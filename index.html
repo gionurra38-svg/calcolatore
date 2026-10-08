@@ -601,13 +601,32 @@ function pianoPastoDefault() {
 const kcalEq = r => { const f = foodByName(r.nome); return f ? f.kcal * r.g / 100 : null; };
 const segno = d => (d > 0 ? "+" : d < 0 ? "−" : "±") + nf(Math.abs(d)) + " kcal";
 const coloreDelta = d => Math.abs(d) < 1 ? "var(--muted)" : d > 0 ? "var(--warn)" : "var(--ok)";
+// Alimenti del tuo database adatti al gruppo (non nel piano): grammi per avere le stesse calorie dell'alimento di riferimento
+function propriFiltro(g) {
+  const k = norm(g);
+  if (k === "proteine" || k === "spuntino proteico") return f => grp(f) === "Proteine";
+  if (k === "carboidrati" || k === "cereali") return f => grp(f) === "Carboidrati";
+  if (k === "verdura") return f => grp(f) === "Verdura";
+  if (k === "frutta") return f => norm(f.sub).includes("frutta") && !norm(f.sub).includes("secca");
+  if (k === "latticini") return f => norm(f.sub).includes("latticin");
+  if (k === "grassi buoni") return f => /grassi|secca/.test(norm(f.sub));
+  return null;
+}
+function propri(g, piano, kr) {
+  const ok = propriFiltro(g); if (!ok || kr === null || !S.data) return [];
+  const nomi = new Set(piano.map(r => norm(r.nome)));
+  return S.data.alimenti.filter(f => f.kcal > 0 && !nomi.has(norm(f.nome)) && ok(f))
+    .sort((a, b) => a.nome.localeCompare(b.nome, "it"))
+    .map(f => ({ pasto: S.piano.pasto, gruppo: g, nome: f.nome, g: Math.max(5, Math.round(kr / f.kcal * 100 / 5) * 5), misura: "stesse calorie del piano", freq: "I tuoi alimenti", rif: 0, proprio: 1 }));
+}
 // Gruppi del pasto: all'inizio nessuna scelta. Le righe dello stesso gruppo sono alternative tra loro.
 function pianoGruppi() {
   const p = S.piano, righe = (S.data.equiv || []).filter(r => r.pasto === p.pasto && r.gruppo !== "_nota");
   return [...new Set(righe.map(r => r.gruppo))].map(g => {
-    const alt = righe.filter(r => r.gruppo === g), rif = alt.find(r => r.rif) || alt[0];
+    const piano = righe.filter(r => r.gruppo === g), rif = piano.find(r => r.rif) || piano[0], kr = kcalEq(rif);
+    const alt = piano.concat(propri(g, piano, kr));
     const sc = alt.find(r => r.nome === p.sel[eqKey(p.pasto, g)]) || null;
-    const kc = sc ? kcalEq(sc) : null, kr = kcalEq(rif);
+    const kc = sc ? kcalEq(sc) : null;
     return { g, alt, rif, sc, kc, kr, delta: sc && kc !== null && kr !== null ? kc - kr : null };
   });
 }
