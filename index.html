@@ -588,7 +588,11 @@ async function salvaNuovo(btn) {
 /* ---------- plan ---------- */
 const slotDi = g => g === "Proteine" ? "prot" : g === "Carboidrati" ? "carbo" : g === "Verdura" ? "verd" : "extra";
 const eqKey = (p, g) => `${p}|${g}`;
-function pianoPasti() { return [...new Set((S.data.equiv || []).map(r => r.pasto))]; }
+const ORDINE_PASTI = ["Pranzo", "Cena", "Colazione", "Spuntino mattina", "Merenda", "Spuntino sera", "Durante la giornata"];
+function pianoPasti() {
+  const p = [...new Set((S.data.equiv || []).map(r => r.pasto))], pos = x => { const i = ORDINE_PASTI.indexOf(x); return i < 0 ? 99 : i; };
+  return p.sort((a, b) => pos(a) - pos(b));
+}
 function pianoPastoDefault() {
   const h = new Date().getHours(), pp = pianoPasti();
   const w = h < 10 ? "Colazione" : h < 12 ? "Spuntino mattina" : h < 15 ? "Pranzo" : h < 18 ? "Merenda" : h < 21 ? "Cena" : "Spuntino sera";
