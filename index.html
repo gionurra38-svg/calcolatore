@@ -199,6 +199,14 @@ nav button[aria-current="page"]{background:var(--accent);color:var(--accent-ink)
 #toast{position:fixed;left:50%;bottom:calc(98px + env(safe-area-inset-bottom));transform:translate(-50%,20px);opacity:0;background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:99px;font-weight:600;font-size:.9rem;z-index:40;transition:.25s;pointer-events:none;max-width:90%}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 .banner{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--r-md);background:color-mix(in srgb,var(--warn) 14%,var(--surface));margin-bottom:12px;font-size:.9rem}
+
+.nf{display:grid;gap:12px}
+.nf label.f{display:grid;gap:4px;font-size:.8rem;font-weight:600;color:var(--muted)}
+.nf input.i{width:100%;box-sizing:border-box;min-height:46px;padding:0 14px;border-radius:var(--r-sm);border:0;background:var(--surface-2);color:var(--ink);font-size:1rem}
+.nf .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.nf video{width:100%;border-radius:var(--r-md);background:#000;aspect-ratio:4/3;object-fit:cover}
+.nf .prev{width:100%;max-height:200px;object-fit:contain;border-radius:var(--r-md);background:var(--surface-2)}
+.addbar{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 </style>
 </head>
 <body>
@@ -324,7 +332,7 @@ function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("o
 
 /* ---------- sheet ---------- */
 function openSheet(html) { $("#sheetBody").innerHTML = html; $("#sheet").classList.add("on"); $("#scrim").classList.add("on"); $("#sheetBody").scrollTop = 0; }
-function closeSheet() { $("#sheet").classList.remove("on"); $("#scrim").classList.remove("on"); }
+function closeSheet() { stopCam(); $("#sheet").classList.remove("on"); $("#scrim").classList.remove("on"); }
 $("#scrim").addEventListener("click", closeSheet);
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
@@ -442,7 +450,7 @@ function mix(f) {
 function viewCibi() {
   const all = S.data ? S.data.alimenti : [];
   const list = all.filter(f => (S.cat === "Tutti" || grp(f) === S.cat) && (!S.q || norm(f.nome + " " + f.ufficiale + " " + f.sub).includes(norm(S.q))));
-  return `<h1>Alimenti</h1><p class="sub">${nf(all.length)} alimenti, con valori ogni 100 g.</p>
+  return `<div class="addbar"><div><h1>Alimenti</h1><p class="sub">${nf(all.length)} alimenti, con valori ogni 100 g.</p></div><button class="btn" data-newfood style="margin-top:8px;padding:0 16px">${ico("plus", 2.4)}Nuovo</button></div>
   <div class="search"><label>${ico("search")}<input id="q" type="search" placeholder="Cerca per nome o marca" value="${esc(S.q)}" autocomplete="off"></label></div>
   <div class="chips">${["Tutti", ...GROUPS].map(c => `<button class="chip" data-cat="${c}" aria-pressed="${S.cat === c}">${c}</button>`).join("")}</div>
   <div class="grid" id="grid" style="margin-top:6px">${list.map(f => `<button class="fcard" data-food="${f.id}"><div class="ph" style="--h:${HUE[grp(f)]}">${esc(f.nome.charAt(0))}${photo(f) ? `<img src="${esc(photo(f))}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</div>
@@ -453,6 +461,7 @@ function bindCibi(root) {
   root.addEventListener("input", e => { if (e.target.id === "q") { S.q = e.target.value; const pos = e.target.selectionStart; render(); const i = $("#q"); i.focus(); i.setSelectionRange(pos, pos); } });
   root.addEventListener("click", e => {
     const c = e.target.closest("[data-cat]"); if (c) { S.cat = c.dataset.cat; return render(); }
+    if (e.target.closest("[data-newfood]")) return openNuovo();
     const f = e.target.closest("[data-food]"); if (f) openFood(Number(f.dataset.food));
   });
 }
@@ -484,6 +493,96 @@ async function openFood(id) {
       catch (er) { w.innerHTML = `<div class="bigph"><span class="small">Non riesco a caricare la foto</span></div>`; }
     }
   };
+}
+
+/* ---------- new food ---------- */
+let NF = {}, camStream = null, camTimer = null;
+function stopCam() { clearInterval(camTimer); camTimer = null; if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; } }
+const NFCAMPI = [["kcal", "Calorie (kcal)"], ["gr", "Grassi (g)"], ["sat", "di cui saturi (g)"], ["ch", "Carboidrati (g)"], ["zu", "di cui zuccheri (g)"], ["fi", "Fibre (g)"], ["pr", "Proteine (g)"], ["sa", "Sale (g)"]];
+function openNuovo(pre) {
+  stopCam();
+  NF = Object.assign({ nome: "", cat: "", barcode: "", extra: "", foto: "" }, pre || {});
+  drawNuovo();
+}
+function drawNuovo() {
+  const empty = !NF.kcal && NF.kcal !== 0;
+  openSheet(`<div class="nf"><h2 style="font-family:var(--display);margin:4px 4px 0;font-size:1.5rem">Nuovo alimento</h2>
+    <div class="row"><button class="btn ghost grow" data-act="scan">Scansiona codice</button><label class="btn ghost grow" style="cursor:pointer">Foto etichetta<input type="file" accept="image/*" capture="environment" data-act="foto" hidden></label></div>
+    <div id="camBox"></div>
+    ${NF.foto ? `<img class="prev" src="${NF.foto}" alt="Foto dell'etichetta"><div class="small">${empty ? "Leggo io i valori dall'etichetta: ci vuole circa un minuto dopo il salvataggio." : "Foto salvata insieme all'alimento."}</div>` : ""}
+    <label class="f">Nome<input class="i" data-f="nome" value="${esc(NF.nome)}" autocomplete="off" placeholder="Ad esempio “Fiocchi di latte”"></label>
+    <div><div class="small" style="margin:0 4px 6px">Gruppo</div><div class="chips">${GROUPS.map(g => `<button class="chip" data-cat="${g}" aria-pressed="${NF.cat === g}">${g}</button>`).join("")}</div></div>
+    <label class="f">Codice a barre (facoltativo)<input class="i" data-f="barcode" inputmode="numeric" value="${esc(NF.barcode)}" autocomplete="off"></label>
+    <div class="small" style="margin:2px 4px 0">Valori per 100 g. Se hai la foto o il codice puoi lasciarli vuoti.</div>
+    <div class="g2">${NFCAMPI.map(([k, l]) => `<label class="f">${l}<input class="i" data-f="${k}" inputmode="decimal" value="${NF[k] ?? ""}" autocomplete="off"></label>`).join("")}</div>
+    <button class="btn" data-act="save">Salva alimento</button></div>`);
+  const b = $("#sheetBody");
+  b.oninput = e => { const k = e.target.dataset.f; if (k) NF[k] = e.target.value; };
+  b.onchange = e => { if (e.target.dataset.act === "foto" && e.target.files[0]) leggiFoto(e.target.files[0]); };
+  b.onclick = e => {
+    const c = e.target.closest("[data-cat]"); if (c) { NF.cat = c.dataset.cat; b.querySelectorAll("[data-cat]").forEach(x => x.setAttribute("aria-pressed", x === c)); return; }
+    const a = e.target.closest("button[data-act]"); if (!a) return;
+    if (a.dataset.act === "scan") return scansiona();
+    if (a.dataset.act === "save") return salvaNuovo(a);
+  };
+}
+function leggiFoto(file) {
+  const img = new Image(), url = URL.createObjectURL(file);
+  img.onload = () => {
+    const k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    NF.foto = c.toDataURL("image/jpeg", .82); URL.revokeObjectURL(url); drawNuovo();
+  };
+  img.onerror = () => toast("Non riesco a leggere la foto");
+  img.src = url;
+}
+async function scansiona() {
+  const box = $("#camBox");
+  if (!("BarcodeDetector" in window) || !navigator.mediaDevices) {
+    box.innerHTML = `<div class="row"><input class="i" id="bcIn" inputmode="numeric" placeholder="Scrivi il codice a barre" style="flex:1;min-height:46px;border-radius:12px;border:0;padding:0 14px;background:var(--surface-2);color:var(--ink)"><button class="btn" id="bcGo">Cerca</button></div><div class="small" style="margin-top:6px">Questo telefono non scansiona dall'app: scrivi il codice.</div>`;
+    $("#bcGo").onclick = () => cercaCodice($("#bcIn").value); return;
+  }
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    box.innerHTML = `<video playsinline muted autoplay></video><div class="small" style="margin-top:6px">Inquadra il codice a barre.</div>`;
+    const v = box.querySelector("video"); v.srcObject = camStream; await v.play();
+    const det = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+    camTimer = setInterval(async () => {
+      try { const r = await det.detect(v); if (r.length) { const code = r[0].rawValue; stopCam(); cercaCodice(code); } } catch (e) {}
+    }, 300);
+  } catch (e) { box.innerHTML = `<div class="small">Non riesco ad aprire la fotocamera: permetti l'accesso e riprova, oppure scrivi il codice nel campo qui sotto.</div>`; }
+}
+async function cercaCodice(code) {
+  code = String(code || "").replace(/\D/g, ""); if (code.length < 6) return toast("Codice non valido");
+  const dup = (S.data.alimenti || []).find(f => String(f.barcode).replace(/\D/g, "") === code);
+  if (dup) { toast("C'è già: " + dup.nome); return; }
+  NF.barcode = code; $("#camBox").innerHTML = `<div class="small">Cerco il prodotto…</div>`;
+  try {
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_it,brands,nutriments`);
+    const j = await r.json();
+    if (j.status !== 1) { toast("Prodotto non trovato: fotografa l'etichetta o scrivi i valori"); drawNuovo(); return; }
+    const p = j.product, n = p.nutriments || {}, v = k => n[k] === undefined || n[k] === "" ? "" : Math.round(Number(n[k]) * 10) / 10;
+    const marca = (p.brands || "").split(",")[0].trim(), nome = p.product_name_it || p.product_name || "";
+    if (!NF.nome) NF.nome = marca && nome && !norm(nome).includes(norm(marca)) ? `${nome} ${marca}` : nome;
+    Object.assign(NF, { kcal: v("energy-kcal_100g"), gr: v("fat_100g"), sat: v("saturated-fat_100g"), ch: v("carbohydrates_100g"), zu: v("sugars_100g"), fi: v("fiber_100g"), pr: v("proteins_100g"), sa: v("salt_100g") });
+    NF.extra = "Valori per 100 g. Fonte: Open Food Facts" + (marca ? " (" + marca + ")" : "") + ".";
+    toast("Trovato: controlla i valori e scegli il gruppo");
+  } catch (e) { toast("Non riesco a cercare: sei offline?"); }
+  drawNuovo();
+}
+async function salvaNuovo(btn) {
+  const nome = (NF.nome || "").trim();
+  if (nome.length < 2) return toast("Scrivi il nome");
+  if (!NF.cat) return toast("Scegli il gruppo");
+  if (foodByName(nome)) return toast("C'è già un alimento con questo nome");
+  if ((NF.kcal === "" || NF.kcal === undefined) && !NF.foto && !NF.barcode) return toast("Servono le calorie, la foto o il codice");
+  btn.disabled = true; btn.textContent = "Salvo…";
+  try {
+    const r = await api("apiAggiungiAlimento", { nome, cat: NF.cat, barcode: NF.barcode, kcal: NF.kcal, gr: NF.gr, sat: NF.sat, ch: NF.ch, zu: NF.zu, pr: NF.pr, fi: NF.fi, sa: NF.sa, extra: NF.extra, foto: NF.foto });
+    if (r && r.dup) { toast("C'è già: " + r.nome); btn.disabled = false; btn.textContent = "Salva alimento"; return; }
+    closeSheet(); toast(NF.kcal === "" || NF.kcal === undefined ? "Aggiunto: i valori arrivano tra poco" : "Aggiunto"); load(true);
+  } catch (e) { toast(e.server ? e.message : "Serve internet per aggiungere un alimento"); btn.disabled = false; btn.textContent = "Salva alimento"; }
 }
 
 /* ---------- plan ---------- */
