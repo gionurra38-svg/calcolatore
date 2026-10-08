@@ -279,7 +279,7 @@ const S = {
   data: LS.get("data", null),
   loading: true,
   conv: Object.assign({ base: null, nuovo: null, g: 100, prio: "Calorie" }, LS.get("conv", {})),
-  piano: Object.assign({ pasto: "Pranzo", sel: {}, prio: "Calorie" }, LS.get("piano", {})),
+  piano: Object.assign({ pasto: "", sel: {} }, LS.get("piano", {})),
   q: "", cat: "Tutti", spesaOpen: false
 };
 const saveConv = () => LS.set("conv", S.conv);
@@ -487,65 +487,73 @@ async function openFood(id) {
 }
 
 /* ---------- plan ---------- */
-const SLOT_OF = f => { const g = grp(f); return g === "Proteine" ? "prot" : g === "Carboidrati" ? "carbo" : g === "Verdura" ? "verd" : "extra"; };
-const rowKey = r => `${r.pasto}|${r.cat}|${r.alimento}`;
-// Righe del pasto: alimento del piano (o quello scelto al suo posto) con i grammi calcolati
-function pianoRighe() {
-  const p = S.piano, k = PRIO[p.prio] || "kcal";
-  return S.data.target.filter(r => r.pasto === p.pasto).map(r => {
-    const ref = foodByName(r.alimento), key = rowKey(r);
-    const cur = (p.sel[key] && foodById(p.sel[key])) || ref;
-    if (!ref || !cur) return { r, key, ref, cur: null, g: r.peso };
-    let kk = k; if (!(ref[kk] > 0) || !(cur[kk] > 0)) kk = "kcal";
-    const g = cur === ref ? r.peso : Math.round(r.peso * ref[kk] / cur[kk]);
-    const attenzione = cur !== ref && kk !== "pr" && grp(ref) === "Proteine" && ref.pr >= 5 && cur.pr * g < 0.7 * ref.pr * r.peso;
-    return { r, key, ref, cur, g, cambiato: cur !== ref, attenzione };
+const slotDi = g => g === "Proteine" ? "prot" : g === "Carboidrati" ? "carbo" : g === "Verdura" ? "verd" : "extra";
+const eqKey = (p, g) => `${p}|${g}`;
+function pianoPasti() { return [...new Set((S.data.equiv || []).map(r => r.pasto))]; }
+function pianoPastoDefault() {
+  const h = new Date().getHours(), pp = pianoPasti();
+  const w = h < 10 ? "Colazione" : h < 12 ? "Spuntino mattina" : h < 15 ? "Pranzo" : h < 18 ? "Merenda" : h < 21 ? "Cena" : "Spuntino sera";
+  return pp.includes(w) ? w : pp[0];
+}
+// Gruppi del pasto, ciascuno con l'alimento scelto (o quello del piano) e le alternative
+function pianoGruppi() {
+  const p = S.piano, righe = (S.data.equiv || []).filter(r => r.pasto === p.pasto && r.gruppo !== "_nota");
+  const ordine = [...new Set(righe.map(r => r.gruppo))];
+  return ordine.map(g => {
+    const alt = righe.filter(r => r.gruppo === g), rif = alt.find(r => r.rif) || alt[0];
+    const sc = alt.find(r => r.nome === p.sel[eqKey(p.pasto, g)]) || rif;
+    return { g, alt, rif, sc, cambiato: sc !== rif };
   });
 }
-function pianoTot() {
-  const t = { kcal: 0, pr: 0, ch: 0, gr: 0, tg: 0 };
-  for (const x of pianoRighe()) { if (!x.cur) continue; t.kcal += x.cur.kcal * x.g / 100; t.pr += x.cur.pr * x.g / 100; t.ch += x.cur.ch * x.g / 100; t.gr += x.cur.gr * x.g / 100; t.tg += x.ref.kcal * x.r.peso / 100; }
-  return t;
+function eqThumb(nome, gruppo) {
+  const f = foodByName(nome);
+  return thumb(f || { nome, foto: "", cat: gruppo === "Proteine" ? "Proteine" : gruppo === "Carboidrati" ? "Carboidrati" : gruppo === "Verdura" ? "Verdura" : "Extra" });
 }
+const eqMisura = r => [r.misura, r.freq].filter(Boolean).join(" · ");
 function viewPiano() {
   const p = S.piano;
   if (!S.data) return "";
-  const pasti = [...new Set(S.data.target.map(r => r.pasto).filter(Boolean))];
-  if (pasti.length && !pasti.includes(p.pasto)) p.pasto = pasti[0];
-  const righe = pianoRighe(), T = pianoTot();
+  const pasti = pianoPasti();
+  if (!pasti.length) return `<h1>Piano pasti</h1><div class="empty-note"><b>Il piano non è ancora nel foglio</b>Serve la scheda Equivalenze_Piano.</div>`;
+  if (!pasti.includes(p.pasto)) p.pasto = pianoPastoDefault();
+  const gruppi = pianoGruppi(), note = (S.data.equiv || []).filter(r => r.pasto === p.pasto && r.gruppo === "_nota");
   const recent = S.data.piano.slice(0, 5);
-  const macro = (lab, v, col) => `<div style="flex:1"><div class="val">${nf(v, 0)} g</div><div class="bar" style="--k:${col}"><i style="width:${Math.min(100, v / Math.max(T.pr, T.ch, T.gr, 1) * 100)}%"></i></div><div class="small" style="margin-top:4px">${lab}</div></div>`;
-  return `<h1>Piano pasti</h1><p class="sub">Scegli cosa mangi: ti dico io quanto ne serve per restare nel piano.</p>
-  <div class="seg" style="margin-bottom:12px">${pasti.map(x => `<button aria-pressed="${p.pasto === x}" data-pasto="${esc(x)}">${esc(x)}</button>`).join("")}</div>
-  ${righe.length ? `<div class="stack">
-    <div class="card"><div class="row" style="justify-content:space-between;align-items:flex-end;margin-bottom:14px">
-      <div><div class="eyebrow">Totale del pasto</div><div class="num" style="font-size:3rem;font-weight:800;line-height:1">${nf(T.kcal)} <small style="font-size:1.1rem;color:var(--muted)">kcal</small></div></div>
-      <div class="small" style="text-align:right">piano: ${nf(T.tg)} kcal<br><b style="color:${Math.abs(T.kcal - T.tg) > T.tg * 0.08 ? "var(--warn)" : "var(--ok)"}">${(T.kcal - T.tg >= 0 ? "+" : "") + nf(T.kcal - T.tg)} kcal</b></div></div>
-      <div class="row" style="gap:14px;align-items:flex-end">${macro("Proteine", T.pr, "var(--p)")}${macro("Carboidrati", T.ch, "var(--c)")}${macro("Grassi", T.gr, "var(--g)")}</div></div>
-    <div><div class="small" style="margin:0 4px 6px">Pareggia le porzioni in base a</div><div class="seg" role="group">${Object.keys(PRIO).map(k => `<button aria-pressed="${p.prio === k}" data-prio="${k}">${k}</button>`).join("")}</div></div>
-    ${righe.map(x => !x.cur ? `<div class="card"><span class="name">${esc(x.r.alimento)}</span><div class="small">${nf(x.r.peso)} g · non è nell'elenco alimenti</div></div>` : `<div class="card slot"><button class="top" data-row="${esc(x.key)}">${thumb(x.cur)}<span class="grow"><span class="eyebrow">${esc(String(x.r.cat).replace(/_/g, " "))}</span><span class="name" style="display:block;font-size:1.05rem">${esc(x.cur.nome)}</span>${x.cambiato ? `<span class="small">al posto di ${esc(x.ref.nome)} (${nf(x.r.peso)} g)</span>` : `<span class="small">come da piano · tocca per cambiare</span>`}${x.cur.extra ? `<span class="small" style="display:block;color:var(--accent,inherit)">${esc(x.cur.extra)}</span>` : ""}</span><span class="num" style="font-weight:800;font-size:1.7rem;line-height:1">${nf(x.g)}<small style="font-size:.9rem;color:var(--muted)"> g</small></span></button>
-      ${x.attenzione ? `<div class="small" style="color:var(--warn)">Ha meno proteine dell'alimento del piano: valuta un'altra scelta.</div>` : ""}
-      ${x.cambiato ? `<div class="bottom"><span class="small">${nf(x.cur.kcal * x.g / 100)} kcal</span><button class="mini" data-reset="${esc(x.key)}">Torna al piano</button></div>` : ""}</div>`).join("")}
-    <button class="btn" id="savePasto">Salva ${esc(p.pasto.toLowerCase())}</button>
-  </div>` : `<div class="empty-note"><b>Nessun piano per questo pasto</b>Aggiungi le righe nel foglio Target_Nutrizionista.</div>`}
-  ${recent.length ? `<div class="sec"><span>Salvati di recente</span></div><div class="card">${recent.map(r => `<div class="item"><span class="grow"><span class="name" style="display:block">${esc(r.pasto)} ${r.data ? "· " + esc(r.data) : ""}</span><span class="small">${esc([r.prot, r.carbo, r.verd, r.extra].filter(Boolean).join(", ") || "—")}</span></span><span class="num" style="font-weight:700">${nf(r.kcal)} kcal</span></div>`).join("")}</div>` : ""}`;
+  return `<h1>Piano pasti</h1><p class="sub">Scegli cosa mangi: le quantità sono quelle del tuo piano.</p>
+  <div class="chips" style="margin-bottom:10px">${pasti.map(x => `<button class="chip" aria-pressed="${p.pasto === x}" data-pasto="${esc(x)}">${esc(x)}</button>`).join("")}</div>
+  <div class="stack">
+    ${note.map(n => `<div class="card small" style="padding:12px 16px">${esc(n.nome)}</div>`).join("")}
+    ${gruppi.map(x => `<div class="card slot"><button class="top" data-gr="${esc(x.g)}">${eqThumb(x.sc.nome, x.g)}<span class="grow"><span class="eyebrow">${esc(x.g)}</span><span class="name" style="display:block;font-size:1.05rem">${esc(x.sc.nome)}</span><span class="small">${x.cambiato ? `al posto di ${esc(x.rif.nome)} (${nf(x.rif.g)} g)` : (x.alt.length > 1 ? "come da piano · tocca per cambiare" : "")}${eqMisura(x.sc) ? `<span style="display:block">${esc(eqMisura(x.sc))}</span>` : ""}</span></span><span class="num" style="font-weight:800;font-size:1.7rem;line-height:1">${nf(x.sc.g)}<small style="font-size:.9rem;color:var(--muted)"> g</small></span></button>
+      ${x.cambiato ? `<div class="bottom"><span></span><button class="mini" data-reset="${esc(x.g)}">Torna al piano</button></div>` : ""}</div>`).join("")}
+    <button class="btn" id="savePasto">Segna ${esc(p.pasto.toLowerCase())} come mangiato</button>
+  </div>
+  ${recent.length ? `<div class="sec"><span>Segnati di recente</span></div><div class="card">${recent.map(r => `<div class="item"><span class="grow"><span class="name" style="display:block">${esc(r.pasto)} ${r.data ? "· " + esc(r.data) : ""}</span><span class="small">${esc([r.prot, r.carbo, r.verd, r.extra].filter(Boolean).join(", ") || "—")}</span></span></div>`).join("")}</div>` : ""}`;
 }
 function bindPiano(root) {
   root.addEventListener("click", async e => {
     const ps = e.target.closest("[data-pasto]"); if (ps) { S.piano.pasto = ps.dataset.pasto; savePiano(); return render(); }
-    const pr = e.target.closest("[data-prio]"); if (pr) { S.piano.prio = pr.dataset.prio; savePiano(); return render(); }
-    const rs = e.target.closest("[data-reset]"); if (rs) { delete S.piano.sel[rs.dataset.reset]; savePiano(); return render(); }
-    const rw = e.target.closest("[data-row]");
-    if (rw) { const x = pianoRighe().find(y => y.key === rw.dataset.row); if (!x || !x.ref) return;
-      return picker({ title: "Al posto di " + x.ref.nome, sub: x.ref.sub, onPick: id => { if (id === x.ref.id) delete S.piano.sel[x.key]; else S.piano.sel[x.key] = id; savePiano(); render(); } }); }
+    const rs = e.target.closest("[data-reset]"); if (rs) { delete S.piano.sel[eqKey(S.piano.pasto, rs.dataset.reset)]; savePiano(); return render(); }
+    const gr = e.target.closest("[data-gr]");
+    if (gr) {
+      const x = pianoGruppi().find(y => y.g === gr.dataset.gr); if (!x || x.alt.length < 2) return;
+      let last = null, html = `<h2 style="font-family:var(--display);margin:4px 4px 10px;font-size:1.4rem">${esc(x.g)}</h2>`;
+      x.alt.forEach((r, i) => {
+        if ((r.freq || "") !== last && r.freq) html += `<div class="eyebrow" style="margin:14px 6px 4px">${esc(r.freq)}</div>`;
+        last = r.freq || "";
+        html += `<button class="listrow" data-eq="${i}">${eqThumb(r.nome, x.g)}<span class="grow"><span class="name" style="display:block">${esc(r.nome)}</span>${r.misura ? `<span class="small">${esc(r.misura)}</span>` : ""}</span><span class="num" style="font-weight:800">${nf(r.g)} g</span></button>`;
+      });
+      openSheet(html);
+      $("#sheetBody").onclick = ev => { const b = ev.target.closest("[data-eq]"); if (!b) return; const r = x.alt[Number(b.dataset.eq)]; if (r.rif) delete S.piano.sel[eqKey(S.piano.pasto, x.g)]; else S.piano.sel[eqKey(S.piano.pasto, x.g)] = r.nome; savePiano(); closeSheet(); render(); };
+      return;
+    }
     if (e.target.closest("#savePasto")) {
       const btn = e.target.closest("#savePasto"); btn.disabled = true;
-      const T = pianoTot(), acc = { prot: [], carbo: [], verd: [], extra: [] }, gr = { prot: 0, carbo: 0, verd: 0, extra: 0 };
-      for (const x of pianoRighe()) { if (!x.cur) continue; const s = SLOT_OF(x.cur); acc[s].push(x.cur.nome); gr[s] += x.g; }
+      const acc = { prot: [], carbo: [], verd: [], extra: [] }, gm = { prot: 0, carbo: 0, verd: 0, extra: 0 };
+      for (const x of pianoGruppi()) { const s = slotDi(x.g); acc[s].push(x.sc.nome); gm[s] += x.sc.g; }
       try {
-        await api("apiSalvaPasto", { pasto: S.piano.pasto, prot: acc.prot.join(", "), gProt: gr.prot, carbo: acc.carbo.join(", "), gCarbo: gr.carbo, verd: acc.verd.join(", "), gVerd: gr.verd, extra: acc.extra.join(", "), gExtra: gr.extra, kcal: Math.round(T.kcal * 100) / 100 });
-        toast("Pasto salvato"); load(true);
-      } catch (er) { toast("Non sono riuscito a salvare"); btn.disabled = false; }
+        await api("apiSalvaPasto", { pasto: S.piano.pasto, prot: acc.prot.join(", "), gProt: gm.prot, carbo: acc.carbo.join(", "), gCarbo: gm.carbo, verd: acc.verd.join(", "), gVerd: gm.verd, extra: acc.extra.join(", "), gExtra: gm.extra, kcal: 0 });
+        toast("Segnato"); load(true);
+      } catch (er) { toast("Non sono riuscito a salvare"); }
+      btn.disabled = false;
     }
   });
 }
