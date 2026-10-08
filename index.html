@@ -495,15 +495,23 @@ function pianoPastoDefault() {
   const w = h < 10 ? "Colazione" : h < 12 ? "Spuntino mattina" : h < 15 ? "Pranzo" : h < 18 ? "Merenda" : h < 21 ? "Cena" : "Spuntino sera";
   return pp.includes(w) ? w : pp[0];
 }
-// Gruppi del pasto, ciascuno con l'alimento scelto (o quello del piano) e le alternative
+const kcalEq = r => { const f = foodByName(r.nome); return f ? f.kcal * r.g / 100 : null; };
+const segno = d => (d > 0 ? "+" : d < 0 ? "−" : "±") + nf(Math.abs(d)) + " kcal";
+const coloreDelta = d => Math.abs(d) < 1 ? "var(--muted)" : d > 0 ? "var(--warn)" : "var(--ok)";
+// Gruppi del pasto: all'inizio nessuna scelta. Le righe dello stesso gruppo sono alternative tra loro.
 function pianoGruppi() {
   const p = S.piano, righe = (S.data.equiv || []).filter(r => r.pasto === p.pasto && r.gruppo !== "_nota");
-  const ordine = [...new Set(righe.map(r => r.gruppo))];
-  return ordine.map(g => {
+  return [...new Set(righe.map(r => r.gruppo))].map(g => {
     const alt = righe.filter(r => r.gruppo === g), rif = alt.find(r => r.rif) || alt[0];
-    const sc = alt.find(r => r.nome === p.sel[eqKey(p.pasto, g)]) || rif;
-    return { g, alt, rif, sc, cambiato: sc !== rif };
+    const sc = alt.find(r => r.nome === p.sel[eqKey(p.pasto, g)]) || null;
+    const kc = sc ? kcalEq(sc) : null, kr = kcalEq(rif);
+    return { g, alt, rif, sc, kc, kr, delta: sc && kc !== null && kr !== null ? kc - kr : null };
   });
+}
+function pianoTot(gr) {
+  const t = { scelti: 0, kcal: 0, delta: 0, ignoti: 0 };
+  for (const x of gr) { if (!x.sc) continue; t.scelti++; if (x.delta === null) t.ignoti++; else { t.kcal += x.kc; t.delta += x.delta; } }
+  return t;
 }
 function eqThumb(nome, gruppo) {
   const f = foodByName(nome);
@@ -516,17 +524,22 @@ function viewPiano() {
   const pasti = pianoPasti();
   if (!pasti.length) return `<h1>Piano pasti</h1><div class="empty-note"><b>Il piano non è ancora nel foglio</b>Serve la scheda Equivalenze_Piano.</div>`;
   if (!pasti.includes(p.pasto)) p.pasto = pianoPastoDefault();
-  const gruppi = pianoGruppi(), note = (S.data.equiv || []).filter(r => r.pasto === p.pasto && r.gruppo === "_nota");
+  const gr = pianoGruppi(), T = pianoTot(gr), note = (S.data.equiv || []).filter(r => r.pasto === p.pasto && r.gruppo === "_nota");
   const recent = S.data.piano.slice(0, 5);
-  return `<h1>Piano pasti</h1><p class="sub">Scegli cosa mangi: le quantità sono quelle del tuo piano.</p>
+  const riepilogo = T.scelti
+    ? `<div class="card"><div class="eyebrow">Rispetto al piano</div><div class="num" style="font-size:2.6rem;font-weight:800;line-height:1;color:${coloreDelta(T.delta)}">${segno(T.delta)}</div><div class="small" style="margin-top:6px">${nf(T.kcal)} kcal scelte${T.ignoti ? ` · per ${T.ignoti} ${T.ignoti === 1 ? "alimento" : "alimenti"} mancano i valori` : ""}</div></div>`
+    : `<div class="card small" style="padding:14px 16px">Scegli un alimento per ogni gruppo: ti dico quanti grammi e di quanto cambiano le calorie rispetto al piano.</div>`;
+  return `<h1>Piano pasti</h1><p class="sub">Per ogni gruppo scegli una sola alternativa.</p>
   <div class="chips" style="margin-bottom:10px">${pasti.map(x => `<button class="chip" aria-pressed="${p.pasto === x}" data-pasto="${esc(x)}">${esc(x)}</button>`).join("")}</div>
   <div class="stack">
     ${note.map(n => `<div class="card small" style="padding:12px 16px">${esc(n.nome)}</div>`).join("")}
-    ${gruppi.map(x => `<div class="card slot"><button class="top" data-gr="${esc(x.g)}">${eqThumb(x.sc.nome, x.g)}<span class="grow"><span class="eyebrow">${esc(x.g)}</span><span class="name" style="display:block;font-size:1.05rem">${esc(x.sc.nome)}</span><span class="small">${x.cambiato ? `al posto di ${esc(x.rif.nome)} (${nf(x.rif.g)} g)` : (x.alt.length > 1 ? "come da piano · tocca per cambiare" : "")}${eqMisura(x.sc) ? `<span style="display:block">${esc(eqMisura(x.sc))}</span>` : ""}</span></span><span class="num" style="font-weight:800;font-size:1.7rem;line-height:1">${nf(x.sc.g)}<small style="font-size:.9rem;color:var(--muted)"> g</small></span></button>
-      ${x.cambiato ? `<div class="bottom"><span></span><button class="mini" data-reset="${esc(x.g)}">Torna al piano</button></div>` : ""}</div>`).join("")}
-    <button class="btn" id="savePasto">Segna ${esc(p.pasto.toLowerCase())} come mangiato</button>
+    ${riepilogo}
+    ${gr.map(x => x.sc ? `<div class="card slot"><button class="top" data-gr="${esc(x.g)}">${eqThumb(x.sc.nome, x.g)}<span class="grow"><span class="eyebrow">${esc(x.g)}</span><span class="name" style="display:block;font-size:1.05rem">${esc(x.sc.nome)}</span><span class="small">${eqMisura(x.sc) ? esc(eqMisura(x.sc)) : "tocca per cambiare"}</span></span><span class="num" style="font-weight:800;font-size:1.7rem;line-height:1">${nf(x.sc.g)}<small style="font-size:.9rem;color:var(--muted)"> g</small></span></button>
+      <div class="bottom"><span class="small">${x.delta === null ? "calorie non disponibili" : `<b style="color:${coloreDelta(x.delta)}">${segno(x.delta)}</b> rispetto a ${esc(x.rif.nome)} (${nf(x.kc)} kcal)`}</span><button class="mini" data-reset="${esc(x.g)}">Togli</button></div></div>`
+      : `<div class="card slot"><button class="top" data-gr="${esc(x.g)}"><span class="iconbtn" style="width:52px;height:52px">${ico("plus")}</span><span class="grow"><span class="eyebrow">${esc(x.g)}</span><span class="name" style="display:block;font-size:1.05rem">Scegli un alimento</span><span class="small">${x.alt.length} alternative</span></span></button></div>`).join("")}
+    <button class="btn" id="savePasto" ${T.scelti ? "" : "disabled"}>Segna ${esc(p.pasto.toLowerCase())} come mangiato</button>
   </div>
-  ${recent.length ? `<div class="sec"><span>Segnati di recente</span></div><div class="card">${recent.map(r => `<div class="item"><span class="grow"><span class="name" style="display:block">${esc(r.pasto)} ${r.data ? "· " + esc(r.data) : ""}</span><span class="small">${esc([r.prot, r.carbo, r.verd, r.extra].filter(Boolean).join(", ") || "—")}</span></span></div>`).join("")}</div>` : ""}`;
+  ${recent.length ? `<div class="sec"><span>Segnati di recente</span></div><div class="card">${recent.map(r => `<div class="item"><span class="grow"><span class="name" style="display:block">${esc(r.pasto)} ${r.data ? "· " + esc(r.data) : ""}</span><span class="small">${esc([r.prot, r.carbo, r.verd, r.extra].filter(Boolean).join(", ") || "—")}</span></span>${r.kcal ? `<span class="num" style="font-weight:700">${nf(r.kcal)} kcal</span>` : ""}</div>`).join("")}</div>` : ""}`;
 }
 function bindPiano(root) {
   root.addEventListener("click", async e => {
@@ -534,26 +547,27 @@ function bindPiano(root) {
     const rs = e.target.closest("[data-reset]"); if (rs) { delete S.piano.sel[eqKey(S.piano.pasto, rs.dataset.reset)]; savePiano(); return render(); }
     const gr = e.target.closest("[data-gr]");
     if (gr) {
-      const x = pianoGruppi().find(y => y.g === gr.dataset.gr); if (!x || x.alt.length < 2) return;
-      let last = null, html = `<h2 style="font-family:var(--display);margin:4px 4px 10px;font-size:1.4rem">${esc(x.g)}</h2>`;
+      const x = pianoGruppi().find(y => y.g === gr.dataset.gr); if (!x) return;
+      let last = null, html = `<h2 style="font-family:var(--display);margin:4px 4px 2px;font-size:1.4rem">${esc(x.g)}</h2><p class="small" style="margin:0 6px 6px">Le calorie sono confrontate con ${esc(x.rif.nome)} del piano.</p>`;
       x.alt.forEach((r, i) => {
         if ((r.freq || "") !== last && r.freq) html += `<div class="eyebrow" style="margin:14px 6px 4px">${esc(r.freq)}</div>`;
         last = r.freq || "";
-        html += `<button class="listrow" data-eq="${i}">${eqThumb(r.nome, x.g)}<span class="grow"><span class="name" style="display:block">${esc(r.nome)}</span>${r.misura ? `<span class="small">${esc(r.misura)}</span>` : ""}</span><span class="num" style="font-weight:800">${nf(r.g)} g</span></button>`;
+        const k = kcalEq(r), d = k !== null && x.kr !== null ? k - x.kr : null;
+        html += `<button class="listrow" data-eq="${i}">${eqThumb(r.nome, x.g)}<span class="grow"><span class="name" style="display:block">${esc(r.nome)}</span><span class="small">${r.misura ? esc(r.misura) + " · " : ""}${d === null ? "calorie non disponibili" : `<b style="color:${coloreDelta(d)}">${segno(d)}</b>`}</span></span><span class="num" style="font-weight:800">${nf(r.g)} g</span></button>`;
       });
       openSheet(html);
-      $("#sheetBody").onclick = ev => { const b = ev.target.closest("[data-eq]"); if (!b) return; const r = x.alt[Number(b.dataset.eq)]; if (r.rif) delete S.piano.sel[eqKey(S.piano.pasto, x.g)]; else S.piano.sel[eqKey(S.piano.pasto, x.g)] = r.nome; savePiano(); closeSheet(); render(); };
+      $("#sheetBody").onclick = ev => { const b = ev.target.closest("[data-eq]"); if (!b) return; S.piano.sel[eqKey(S.piano.pasto, x.g)] = x.alt[Number(b.dataset.eq)].nome; savePiano(); closeSheet(); render(); };
       return;
     }
     if (e.target.closest("#savePasto")) {
       const btn = e.target.closest("#savePasto"); btn.disabled = true;
-      const acc = { prot: [], carbo: [], verd: [], extra: [] }, gm = { prot: 0, carbo: 0, verd: 0, extra: 0 };
-      for (const x of pianoGruppi()) { const s = slotDi(x.g); acc[s].push(x.sc.nome); gm[s] += x.sc.g; }
+      const acc = { prot: [], carbo: [], verd: [], extra: [] }, gm = { prot: 0, carbo: 0, verd: 0, extra: 0 }, G = pianoGruppi(), T = pianoTot(G);
+      for (const x of G) { if (!x.sc) continue; const s = slotDi(x.g); acc[s].push(x.sc.nome); gm[s] += x.sc.g; }
       try {
-        await api("apiSalvaPasto", { pasto: S.piano.pasto, prot: acc.prot.join(", "), gProt: gm.prot, carbo: acc.carbo.join(", "), gCarbo: gm.carbo, verd: acc.verd.join(", "), gVerd: gm.verd, extra: acc.extra.join(", "), gExtra: gm.extra, kcal: 0 });
-        toast("Segnato"); load(true);
-      } catch (er) { toast("Non sono riuscito a salvare"); }
-      btn.disabled = false;
+        await api("apiSalvaPasto", { pasto: S.piano.pasto, prot: acc.prot.join(", "), gProt: gm.prot, carbo: acc.carbo.join(", "), gCarbo: gm.carbo, verd: acc.verd.join(", "), gVerd: gm.verd, extra: acc.extra.join(", "), gExtra: gm.extra, kcal: Math.round(T.kcal * 100) / 100 });
+        for (const x of G) delete S.piano.sel[eqKey(S.piano.pasto, x.g)];
+        savePiano(); toast("Segnato"); render(); load(true);
+      } catch (er) { toast("Non sono riuscito a salvare"); btn.disabled = false; }
     }
   });
 }
