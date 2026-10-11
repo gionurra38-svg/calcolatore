@@ -640,7 +640,10 @@ async function salvaNuovo(btn) {
   try {
     const r = await api("apiAggiungiAlimento", { nome, cat: NF.cat, barcode: NF.barcode, kcal: NF.kcal, gr: NF.gr, sat: NF.sat, ch: NF.ch, zu: NF.zu, pr: NF.pr, fi: NF.fi, sa: NF.sa, extra: NF.extra, foto: NF.foto, fotoUrl: NF.fotoUrl });
     if (r && r.dup) { toast("C'è già: " + r.nome); btn.disabled = false; btn.textContent = "Salva alimento"; return; }
-    closeSheet(); toast(NF.kcal === "" || NF.kcal === undefined ? "Aggiunto: i valori arrivano tra poco" : "Aggiunto"); load(true);
+    const attesa = NF.kcal === "" || NF.kcal === undefined;
+    closeSheet(); toast(attesa ? "Aggiunto: leggo i valori, ci vuole meno di un minuto" : "Aggiunto"); load(true);
+    api("apiElabora").catch(() => {}); // fa partire subito la lettura dell'etichetta e le foto
+    if (attesa) [15000, 30000, 50000].forEach(ms => setTimeout(() => load(true), ms));
   } catch (e) { toast(e.server ? e.message : "Serve internet per aggiungere un alimento"); btn.disabled = false; btn.textContent = "Salva alimento"; }
 }
 
