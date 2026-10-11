@@ -288,7 +288,7 @@ const S = {
   loading: true,
   conv: Object.assign({ base: null, nuovo: null, g: 100, prio: "Calorie" }, LS.get("conv", {})),
   piano: Object.assign({ pasto: "", sel: {} }, LS.get("piano", {})),
-  q: "", cat: "Tutti", spesaOpen: false
+  q: "", cat: "Tutti", sub: "Tutti", sort: "az", spesaOpen: false
 };
 const saveConv = () => LS.set("conv", S.conv);
 const savePiano = () => LS.set("piano", S.piano);
@@ -449,18 +449,27 @@ function mix(f) {
 }
 function viewCibi() {
   const all = S.data ? S.data.alimenti : [];
-  const list = all.filter(f => (S.cat === "Tutti" || grp(f) === S.cat) && (!S.q || norm(f.nome + " " + f.ufficiale + " " + f.sub).includes(norm(S.q))));
+  const inCat = all.filter(f => S.cat === "Tutti" || grp(f) === S.cat);
+  const subOf = f => (f.sub || "").replace(/_/g, " ").trim() || "Altro";
+  const subs = [...new Set(inCat.map(subOf))].sort((a, b) => a === "Altro" ? 1 : b === "Altro" ? -1 : a.localeCompare(b, "it"));
+  if (S.sub !== "Tutti" && !subs.includes(S.sub)) S.sub = "Tutti";
+  const ORD = { az: ["Nome A–Z", (a, b) => a.nome.localeCompare(b.nome, "it")], kcal: ["Meno calorie", (a, b) => (a.kcal || 1e9) - (b.kcal || 1e9)], kcalD: ["Più calorie", (a, b) => b.kcal - a.kcal], pr: ["Più proteine", (a, b) => b.pr - a.pr], ch: ["Più carboidrati", (a, b) => b.ch - a.ch], gr: ["Meno grassi", (a, b) => (a.kcal ? a.gr : 1e9) - (b.kcal ? b.gr : 1e9)], fi: ["Più fibre", (a, b) => b.fi - a.fi], rec: ["Aggiunti di recente", (a, b) => b.id - a.id] };
+  const list = inCat.filter(f => (S.sub === "Tutti" || subOf(f) === S.sub) && (!S.q || norm(f.nome + " " + f.ufficiale + " " + f.sub).includes(norm(S.q)))).sort(ORD[S.sort][1]);
   return `<div class="addbar"><div><h1>Alimenti</h1><p class="sub">${nf(all.length)} alimenti, con valori ogni 100 g.</p></div><button class="btn" data-newfood style="margin-top:8px;padding:0 16px">${ico("plus", 2.4)}Nuovo</button></div>
   <div class="search"><label>${ico("search")}<input id="q" type="search" placeholder="Cerca per nome o marca" value="${esc(S.q)}" autocomplete="off"></label></div>
   <div class="chips">${["Tutti", ...GROUPS].map(c => `<button class="chip" data-cat="${c}" aria-pressed="${S.cat === c}">${c}</button>`).join("")}</div>
+  ${subs.length > 1 ? `<div class="chips" style="margin-top:8px">${["Tutti", ...subs].map(c => `<button class="chip" data-sub="${esc(c)}" aria-pressed="${S.sub === c}">${esc(c)}</button>`).join("")}</div>` : ""}
+  <div class="row" style="margin:10px 2px 4px;justify-content:space-between"><span class="small">${nf(list.length)} ${list.length === 1 ? "alimento" : "alimenti"}</span><label class="small" style="display:flex;align-items:center;gap:8px">Ordina per<select id="sortSel" style="border:0;border-radius:999px;background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line);padding:8px 12px;font:inherit;font-weight:600">${Object.entries(ORD).map(([k, v]) => `<option value="${k}" ${S.sort === k ? "selected" : ""}>${v[0]}</option>`).join("")}</select></label></div>
   <div class="grid" id="grid" style="margin-top:6px">${list.map(f => `<button class="fcard" data-food="${f.id}"><div class="ph" style="--h:${HUE[grp(f)]}">${esc(f.nome.charAt(0))}${photo(f) ? `<img src="${esc(photo(f))}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</div>
     <div class="tx"><div class="nm">${esc(f.nome)}</div>${mix(f)}<div class="kc"><b class="num">${nf(f.kcal)}</b> kcal</div></div></button>`).join("")}</div>
   ${list.length ? "" : `<div class="empty-note"><b>Nessun alimento</b>Cambia ricerca o categoria.</div>`}`;
 }
 function bindCibi(root) {
+  root.addEventListener("change", e => { if (e.target.id === "sortSel") { S.sort = e.target.value; render(); } });
   root.addEventListener("input", e => { if (e.target.id === "q") { S.q = e.target.value; const pos = e.target.selectionStart; render(); const i = $("#q"); i.focus(); i.setSelectionRange(pos, pos); } });
   root.addEventListener("click", e => {
-    const c = e.target.closest("[data-cat]"); if (c) { S.cat = c.dataset.cat; return render(); }
+    const c = e.target.closest("[data-cat]"); if (c) { S.cat = c.dataset.cat; S.sub = "Tutti"; return render(); }
+    const sb = e.target.closest("[data-sub]"); if (sb) { S.sub = sb.dataset.sub; return render(); }
     if (e.target.closest("[data-newfood]")) return openNuovo();
     const f = e.target.closest("[data-food]"); if (f) openFood(Number(f.dataset.food));
   });
