@@ -524,7 +524,9 @@ function drawNuovo() {
   b.onchange = e => { if (e.target.dataset.act === "foto" && e.target.files[0]) leggiFoto(e.target.files[0]); };
   b.onclick = e => {
     const c = e.target.closest("[data-cat]"); if (c) { NF.cat = c.dataset.cat; b.querySelectorAll("[data-cat]").forEach(x => x.setAttribute("aria-pressed", x === c)); return; }
-    const o = e.target.closest("[data-off]"); if (o) { const p = (NF.risultati || [])[Number(o.dataset.off)]; if (p) { const dup = (S.data.alimenti || []).find(f => p.code && String(f.barcode).replace(/\D/g, "") === String(p.code)); if (dup) return toast("C'è già: " + dup.nome); NF.nome = ""; usaProdotto(p); drawNuovo(); toast("Compilato: controlla e scegli il gruppo"); } return; }
+    if (e.target.closest("[data-more]")) return piuRisultati();
+    if (e.target.closest("[data-std]")) { if (NF.res && NF.res.std) { if (foodByName(NF.res.std.nome)) return toast("C'è già: " + NF.res.std.nome); usaStandard(NF.res.std); drawNuovo(); toast("Compilato: controlla e salva"); } return; }
+    const o = e.target.closest("[data-off]"); if (o) { const p = (NF.risultati || [])[Number(o.dataset.off)]; if (p) { const dup = (S.data.alimenti || []).find(f => p.code && String(f.barcode).replace(/\D/g, "") === String(p.code)); if (dup) return toast("C'è già: " + dup.nome); NF.nome = ""; NF.fotoUrl = ""; usaProdotto(p); drawNuovo(); toast("Compilato: controlla e scegli il gruppo"); } return; }
     const a = e.target.closest("button[data-act]"); if (!a) return;
     if (a.dataset.act === "scan") return scansiona();
     if (a.dataset.act === "save") return salvaNuovo(a);
@@ -566,19 +568,44 @@ function usaProdotto(p, code) {
   const img = p.image_front_url || p.image_front_small_url || ""; if (/^https:/i.test(img)) NF.fotoUrl = img;
   NF.extra = "Valori per 100 g. Fonte: Open Food Facts" + (marca ? " (" + marca + ")" : "") + ".";
 }
+function offOk(p) { return (p.product_name_it || p.product_name) && p.nutriments && p.nutriments["energy-kcal_100g"] !== undefined && p.nutriments["energy-kcal_100g"] !== ""; }
+async function offPagina(q, page) {
+  const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&page=${page}&lc=it&fields=code,product_name,product_name_it,brands,image_front_url,image_front_small_url,nutriments`);
+  const j = await r.json(), nq = norm(q);
+  const score = p => { const n = norm(p.product_name_it || p.product_name); return n === nq ? 0 : n.startsWith(nq) ? 1 : n.includes(nq) ? 2 : 3; };
+  return (j.products || []).filter(offOk).map((p, i) => [score(p), i, p]).sort((x, y) => x[0] - y[0] || x[1] - y[1]).map(x => x[2]);
+}
+function drawRisultati() {
+  const R = NF.res, box = $("#camBox"); if (!R || !box) return;
+  const std = R.std === undefined ? `<div class="card small" style="padding:12px 14px">Cerco i valori standard di “${esc(R.q)}”…</div>`
+    : R.std ? `<button class="listrow" data-std style="background:color-mix(in srgb,var(--accent) 10%,var(--surface));border-radius:var(--r-md);padding:10px"><div class="thumb sq" style="--h:345">${esc(R.std.nome.charAt(0).toUpperCase())}${R.std.foto ? `<img src="${esc(R.std.foto)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</div><span class="grow"><span class="name" style="display:block">${esc(R.std.nome)}</span><span class="small">Valori standard (tabelle CREA) · ${R.std.cat}</span></span><span class="num" style="font-weight:800">${nf(R.std.kcal)} kcal</span></button>` : "";
+  const list = R.list.slice(0, R.shown);
+  box.innerHTML = std + (list.length ? `<div class="small" style="margin:8px 4px 4px">Prodotti confezionati</div>` : "") + list.map((p, i) => {
+    const nm = p.product_name_it || p.product_name, im = p.image_front_small_url || "";
+    return `<button class="listrow" data-off="${i}"><div class="thumb sq" style="--h:345">${esc(nm.charAt(0).toUpperCase())}${/^https:/i.test(im) ? `<img src="${esc(im)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</div><span class="grow"><span class="name" style="display:block">${esc(nm)}</span><span class="small">${esc((p.brands || "").split(",")[0])}</span></span><span class="num" style="font-weight:800">${nf(p.nutriments["energy-kcal_100g"])} kcal</span></button>`;
+  }).join("") + (R.fine && R.shown >= R.list.length ? "" : `<button class="btn ghost" data-more style="width:100%;margin-top:8px">Proponi altri</button>`)
+    + (!R.std && R.std !== undefined && !list.length && R.fine ? `<div class="small">Non trovo “${esc(R.q)}”. Prova un altro nome, scansiona il codice o scrivi i valori a mano.</div>` : "");
+  NF.risultati = list;
+}
 async function cercaNome(q) {
   q = String(q || "").trim(); if (q.length < 3) return toast("Scrivi almeno 3 lettere");
-  const box = $("#camBox"); stopCam(); box.innerHTML = `<div class="small">Cerco “${esc(q)}”…</div>`;
-  try {
-    const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&lc=it&fields=code,product_name,product_name_it,brands,image_front_url,image_front_small_url,nutriments`);
-    const j = await r.json(), tutti = (j.products || []).filter(p => (p.product_name_it || p.product_name) && p.nutriments && p.nutriments["energy-kcal_100g"] !== undefined && p.nutriments["energy-kcal_100g"] !== "");
-    const list = tutti.slice(0, 8); NF.risultati = list;
-    if (!list.length) { box.innerHTML = `<div class="small">Non trovo “${esc(q)}”. Prova un altro nome, scansiona il codice o scrivi i valori a mano.</div>`; return; }
-    box.innerHTML = `<div class="small" style="margin:0 4px 6px">Tocca quello giusto: compilo nome, foto e valori per 100 g.</div>` + list.map((p, i) => {
-      const nm = p.product_name_it || p.product_name, im = p.image_front_small_url || "";
-      return `<button class="listrow" data-off="${i}"><div class="thumb sq" style="--h:345">${esc(nm.charAt(0).toUpperCase())}${/^https:/i.test(im) ? `<img src="${esc(im)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</div><span class="grow"><span class="name" style="display:block">${esc(nm)}</span><span class="small">${esc((p.brands || "").split(",")[0])}</span></span><span class="num" style="font-weight:800">${nf(p.nutriments["energy-kcal_100g"])} kcal</span></button>`;
-    }).join("");
-  } catch (e) { box.innerHTML = `<div class="small">Non riesco a cercare: sei offline?</div>`; }
+  stopCam();
+  const R = NF.res = { q, std: undefined, list: [], shown: 8, page: 1, fine: false };
+  $("#camBox").innerHTML = `<div class="small">Cerco “${esc(q)}”…</div>`;
+  api("apiAlimentoStandard", q).then(d => { if (NF.res === R) { R.std = d || null; drawRisultati(); } }).catch(() => { if (NF.res === R) { R.std = null; drawRisultati(); } });
+  try { R.list = await offPagina(q, 1); if (R.list.length < 8) R.fine = true; } catch (e) { R.fine = true; toast("Non riesco a cercare i prodotti: sei offline?"); }
+  if (NF.res === R) drawRisultati();
+}
+async function piuRisultati() {
+  const R = NF.res; if (!R) return;
+  if (R.shown < R.list.length) { R.shown += 8; return drawRisultati(); }
+  try { R.page++; const more = await offPagina(R.q, R.page), visti = new Set(R.list.map(p => p.code)); const nuovi = more.filter(p => !visti.has(p.code)); if (!nuovi.length) R.fine = true; R.list = R.list.concat(nuovi); R.shown += 8; }
+  catch (e) { R.fine = true; toast("Non riesco a caricarne altri"); }
+  drawRisultati();
+}
+function usaStandard(d) {
+  Object.assign(NF, { nome: d.nome, cat: d.cat, kcal: d.kcal, gr: d.gr, sat: d.sat, ch: d.ch, zu: d.zu, fi: d.fi, pr: d.pr, sa: d.sa, barcode: "", fotoUrl: d.foto || "" });
+  NF.extra = "Valori standard per 100 g (tabelle CREA, stima): verifica con la tua fonte.";
 }
 async function cercaCodice(code) {
   code = String(code || "").replace(/\D/g, ""); if (code.length < 6) return toast("Codice non valido");
