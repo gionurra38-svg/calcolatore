@@ -331,8 +331,16 @@ let tt;
 function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("on"), 2200); }
 
 /* ---------- sheet ---------- */
-function openSheet(html) { $("#sheetBody").innerHTML = html; $("#sheet").classList.add("on"); $("#scrim").classList.add("on"); $("#sheetBody").scrollTop = 0; }
-function closeSheet() { stopCam(); $("#sheet").classList.remove("on"); $("#scrim").classList.remove("on"); }
+let sheetOpen = false, skipPop = false;
+function hideSheetUI() { stopCam(); $("#sheet").classList.remove("on"); $("#scrim").classList.remove("on"); }
+function openSheet(html) {
+  $("#sheetBody").innerHTML = html; $("#sheet").classList.add("on"); $("#scrim").classList.add("on"); $("#sheetBody").scrollTop = 0;
+  if (!sheetOpen) { sheetOpen = true; try { history.pushState({ sheet: 1 }, ""); } catch (e) {} }   // il tasto Indietro chiude la scheda
+}
+function closeSheet() {
+  hideSheetUI();
+  if (sheetOpen) { sheetOpen = false; skipPop = true; try { history.back(); } catch (e) { skipPop = false; } }
+}
 $("#scrim").addEventListener("click", closeSheet);
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
@@ -491,7 +499,7 @@ async function openFood(id) {
   const body = $("#sheetBody");
   body.onclick = async e => {
     const u = e.target.closest("[data-use]");
-    if (u) { S.conv[u.dataset.use] = f.id; saveConv(); closeSheet(); setTab("conv"); return; }
+    if (u) { S.conv[u.dataset.use] = f.id; saveConv(); setTab("conv"); return; }
     const ph = e.target.closest("[data-ph]"); if (!ph) return;
     body.querySelectorAll("[data-ph]").forEach(b => b.setAttribute("aria-pressed", b === ph));
     const w = $("#phWrap");
@@ -791,7 +799,18 @@ const TABS = [["conv", "Converti"], ["piano", "Piano"], ["cibi", "Alimenti"], ["
 const VIEWS = { conv: [viewConv, bindConv, afterConv], piano: [viewPiano, bindPiano], cibi: [viewCibi, bindCibi], spesa: [viewSpesa, bindSpesa] };
 $("#nav").innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" aria-label="${l}">${ico(k)}<span>${l}</span></button>`).join("");
 $("#nav").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); });
-function setTab(t) { S.tab = t; LS.set("tab", t); render(); scrollTo({ top: 0 }); }
+function setTab(t) {
+  if (sheetOpen) { sheetOpen = false; hideSheetUI(); try { history.replaceState({ tab: t }, ""); } catch (e) {} }   // la scheda aperta diventa la nuova schermata
+  else if (t !== S.tab) { try { history.pushState({ tab: t }, ""); } catch (e) {} }
+  S.tab = t; LS.set("tab", t); render(); scrollTo({ top: 0 });
+}
+try { history.replaceState({ tab: S.tab }, ""); } catch (e) {}
+addEventListener("popstate", e => {
+  if (skipPop) { skipPop = false; return; }
+  if (sheetOpen) { sheetOpen = false; hideSheetUI(); return; }          // Indietro con una scheda aperta: chiude la scheda
+  const t = e.state && e.state.tab;
+  if (t && t !== S.tab && VIEWS[t]) { S.tab = t; LS.set("tab", t); render(); scrollTo({ top: 0 }); }   // Indietro: schermata precedente
+});
 const bound = {};
 function render() {
   document.querySelectorAll("#nav button").forEach(b => b.dataset.tab === S.tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
