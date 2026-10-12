@@ -49,3 +49,4 @@ Regole generali:
 - Non lanciare agenti per compiti che bastano 1–3 comandi: ogni agente parte da zero e deve ricostruire il contesto.
 - Quando un agente serve, dagli il marcatore della sezione e i nomi delle funzioni presi da questa tabella, così non deve cercarli.
 - Risposte brevi: riassumi cosa è cambiato, senza incollare il codice già scritto nel file.
+- La finestra di contesto è limitata a 400k token (`autoCompactWindow` in `.claude/settings.json`): oltre quella soglia la conversazione viene riassunta in automatico. Per lavori nuovi meglio aprire una conversazione nuova.
